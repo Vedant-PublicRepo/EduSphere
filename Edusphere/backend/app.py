@@ -174,16 +174,27 @@ def ensure_initial_admin() -> None:
 
 
 def ensure_email_available(conn, email: str, *, exclude_user_id: str | None = None):
-    row = conn.execute(
-        """
-        SELECT id
-        FROM users
-        WHERE lower(email) = lower(?)
-          AND (? IS NULL OR id != ?)
-        LIMIT 1
-        """,
-        (email, exclude_user_id, exclude_user_id),
-    ).fetchone()
+    if exclude_user_id is None:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE lower(email) = lower(?)
+            LIMIT 1
+            """,
+            (email,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE lower(email) = lower(?)
+              AND id != ?
+            LIMIT 1
+            """,
+            (email, exclude_user_id),
+        ).fetchone()
     if row:
         raise ValueError("That email is already in use")
 
@@ -1417,6 +1428,48 @@ def create_faculty():
         conn.commit()
 
     return jsonify({"id": faculty_id, "username": username}), 201
+
+
+@app.post("/api/admins")
+@require_roles("admin")
+def create_admin():
+    payload = request.get_json(silent=True) or {}
+
+    with get_connection() as conn:
+        try:
+            name = clean_text(payload.get("name"), field_name="Full name", max_len=120)
+            email = normalize_email(payload.get("email"))
+            phone = normalize_phone(payload.get("phone"))
+            password = validate_password(payload.get("password"))
+
+            ensure_email_available(conn, email)
+
+            existing = conn.execute(
+                "SELECT id FROM users WHERE role = 'admin' ORDER BY id"
+            ).fetchall()
+            admin_id = next_prefixed_id(existing, "ADMIN", 101)
+            username = email
+
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
+
+        conn.execute(
+            """
+            INSERT INTO users (id, role, username, password_hash, full_name, email, phone, is_active)
+            VALUES (?, 'admin', ?, ?, ?, ?, ?, 1)
+            """,
+            (
+                admin_id,
+                username,
+                generate_password_hash(password),
+                name,
+                email,
+                phone,
+            ),
+        )
+        conn.commit()
+
+    return jsonify({"id": admin_id, "username": username}), 201
 
 
 @app.put("/api/faculty/<faculty_id>")

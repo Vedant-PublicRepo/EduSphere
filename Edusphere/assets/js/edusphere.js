@@ -1,4 +1,4 @@
-﻿// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
       // DATA STORE
       // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
       let db = {
@@ -1241,13 +1241,23 @@
         .join("")}
     </div>
     <div class="section-card">
-      <div class="section-head"><div><h3>System Preferences</h3><p>Manage application-wide settings</p></div></div>
+      <div class="section-head">
+        <div><h3>System Preferences</h3><p>Manage application-wide settings</p></div>
+      </div>
       <div class="form-grid">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" checked/> Enable Email Notifications</label>
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="checkbox"/> Maintenance Mode</label>
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" checked/> Allow Student Registration</label>
       </div>
       <div class="form-actions" style="margin-top:16px"><button class="btn btn-secondary" onclick="toast('Preferences saved!', 'success')">Save Preferences</button></div>
+    </div>
+    
+    <div class="section-card">
+      <div class="section-head">
+        <div><h3>Administrators</h3><p>Manage system administrators</p></div>
+        <div class="section-actions"><button class="btn btn-primary" id="addAdminBtn">+ Add Admin</button></div>
+      </div>
+      <p style="font-size:0.9rem; color:var(--muted); margin-bottom:12px;">Admin accounts have full access to the system. You can add more administrators from here.</p>
     </div>
   </div>
 </div>`;
@@ -2850,6 +2860,45 @@
           };
         });
 
+        // Admin: add admin
+        byId("addAdminBtn")?.addEventListener("click", () => {
+          openModal(
+            "Add Administrator",
+            "Fill in administrator details",
+            `
+      <div class="form-grid">
+        <div class="form-field"><label for="mAdminName">Full Name</label><input id="mAdminName" type="text" required/></div>
+        <div class="form-field"><label for="mAdminEmail">Email</label><input id="mAdminEmail" type="email" required/></div>
+        <div class="form-field"><label for="mAdminPhone">Phone</label><input id="mAdminPhone" type="text"/></div>
+        <div class="form-field"><label for="mAdminPassword">Password</label><input id="mAdminPassword" type="password" required/></div>
+      </div>
+      <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button><button type="submit" class="btn btn-primary">Add Admin</button></div>
+    `,
+            async () => {
+              const name = byId("mAdminName").value.trim(),
+                email = byId("mAdminEmail").value.trim(),
+                phone = byId("mAdminPhone").value.trim(),
+                password = byId("mAdminPassword").value;
+              if (!name || !email || !password) {
+                toast("Name, email and password are required.", "error");
+                return;
+              }
+              if (backendReady) {
+                await apiRequest("/api/admins", {
+                  method: "POST",
+                  body: JSON.stringify({ name, email, phone, password }),
+                });
+                await refreshDbFromApi();
+                closeModal();
+                toast("Administrator added.", "success");
+                renderSections();
+              } else {
+                toast("Admins can only be added when connected to backend.", "error");
+              }
+            },
+          );
+        });
+
         // Admin/faculty: announcements
         byId("addAnnouncementBtn")?.addEventListener("click", () => {
           openModal(
@@ -2949,15 +2998,21 @@
           btn.onclick = async () => {
             const announcementId = btn.dataset.deleteAnnouncement;
             if (!announcementId) return;
-            if (backendReady) {
-              await apiRequest(`/api/announcements/${announcementId}`, {
-                method: "DELETE",
-              });
+            try {
+              if (backendReady) {
+                await apiRequest(`/api/announcements/${announcementId}`, {
+                  method: "DELETE",
+                });
+                await refreshDbFromApi();
+              } else {
+                db.announcements = db.announcements.filter((item) => item.id !== announcementId);
+              }
+              toast("Announcement deleted.", "success");
+            } catch (error) {
+              console.warn(error);
+              toast("Could not delete or already deleted.", "error");
               await refreshDbFromApi();
-            } else {
-              db.announcements = db.announcements.filter((item) => item.id !== announcementId);
             }
-            toast("Announcement deleted.", "success");
             renderSections();
           };
         });
