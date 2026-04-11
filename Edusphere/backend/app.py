@@ -968,14 +968,18 @@ def auth_logout():
 @require_auth
 def bootstrap():
     with get_connection() as conn:
-        admin = conn.execute(
-            """
-            SELECT id, username, full_name AS name, email, phone
-            FROM users
-            WHERE role = 'admin'
-            LIMIT 1
-            """
-        ).fetchone()
+        admins = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT id, username, full_name AS name, email, phone
+                FROM users
+                WHERE role = 'admin'
+                ORDER BY id
+                """
+            ).fetchall()
+        ]
+        admin = admins[0] if admins else None
         faculty = [
             dict(row)
             for row in conn.execute(
@@ -1155,22 +1159,22 @@ def bootstrap():
         ).fetchall():
             key = f"{row['student_id']}_{row['course_id']}_{row['lecture_id']}"
             lecture_status[key] = bool(row["seen"])
-
-    payload = {
-        "admin": dict(admin) if admin else None,
-        "faculty": faculty,
-        "students": students,
-        "courses": courses,
-        "subjects": subjects,
-        "marks": marks,
-        "attendance": attendance,
-        "announcements": announcements,
-        "notifications": notifications,
-        "assignments": assignments,
-        "reportCards": report_cards,
-        "attendanceSessions": attendance_sessions,
-        "lectureStatus": lecture_status,
-    }
+        payload = {
+            "admin": dict(admin) if admin else None,
+            "admins": admins,
+            "faculty": faculty,
+            "students": students,
+            "courses": courses,
+            "subjects": subjects,
+            "marks": marks,
+            "attendance": attendance,
+            "announcements": announcements,
+            "notifications": notifications,
+            "assignments": assignments,
+            "reportCards": report_cards,
+            "attendanceSessions": attendance_sessions,
+            "lectureStatus": lecture_status,
+        }
 
     return jsonify(bootstrap_for_user(request.current_user, payload))
 
@@ -1472,6 +1476,59 @@ def create_admin():
     return jsonify({"id": admin_id, "username": username}), 201
 
 
+@app.put("/api/admins/<admin_id>")
+@require_roles("admin")
+def update_admin_user(admin_id: str):
+    payload = request.get_json(silent=True) or {}
+    with get_connection() as conn:
+        existing = conn.execute("SELECT id FROM users WHERE id = ? AND role = 'admin'", (admin_id,)).fetchone()
+        if not existing:
+            return jsonify({"error": "Admin not found"}), 404
+
+        try:
+            name = clean_text(payload.get("name"), field_name="Full name", max_len=120)
+            email = normalize_email(payload.get("email"))
+            phone = normalize_phone(payload.get("phone"))
+            ensure_email_available(conn, email, exclude_user_id=admin_id)
+            password = str(payload.get("password", "")).strip()
+            if password:
+                password = validate_password(password)
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
+
+        if password:
+            conn.execute(
+                "UPDATE users SET full_name = ?, username = ?, email = ?, phone = ?, password_hash = ? WHERE id = ?",
+                (name, email, email, phone, generate_password_hash(password), admin_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE users SET full_name = ?, username = ?, email = ?, phone = ? WHERE id = ?",
+                (name, email, email, phone, admin_id),
+            )
+        conn.commit()
+
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/admins/<admin_id>")
+@require_roles("admin")
+def delete_admin_user(admin_id: str):
+    user = request.current_user
+    if user["id"] == admin_id:
+        return jsonify({"error": "You cannot delete yourself"}), 400
+
+    with get_connection() as conn:
+        existing = conn.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0]
+        if existing <= 1:
+            return jsonify({"error": "Cannot delete the last admin"}), 400
+
+        conn.execute("DELETE FROM users WHERE id = ? AND role = 'admin'", (admin_id,))
+        conn.commit()
+
+    return jsonify({"ok": True})
+
+
 @app.put("/api/faculty/<faculty_id>")
 @require_auth
 def update_faculty(faculty_id: str):
@@ -1504,23 +1561,43 @@ def update_faculty(faculty_id: str):
             if len(bio) > 500:
                 raise ValueError("Bio is too long")
             ensure_email_available(conn, email, exclude_user_id=faculty_id)
+            password = str(payload.get("password", "")).strip()
+            if password:
+                password = validate_password(password)
         except ValueError as error:
             return jsonify({"error": str(error)}), 400
 
-        conn.execute(
-            """
-            UPDATE users
-            SET full_name = ?, username = ?, email = ?, phone = ?
-            WHERE id = ?
-            """,
-            (
-                name,
-                email,
-                email,
-                phone,
-                faculty_id,
-            ),
-        )
+        if password:
+            conn.execute(
+                """
+                UPDATE users
+                SET full_name = ?, username = ?, email = ?, phone = ?, password_hash = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    email,
+                    email,
+                    phone,
+                    generate_password_hash(password),
+                    faculty_id,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE users
+                SET full_name = ?, username = ?, email = ?, phone = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    email,
+                    email,
+                    phone,
+                    faculty_id,
+                ),
+            )
         conn.execute(
             """
             UPDATE faculty_profiles

@@ -9,6 +9,7 @@
           name: "Admin",
           id: "ADMIN1",
         },
+        admins: [],
         faculty: [],
         students: [],
         courses: [],
@@ -137,6 +138,7 @@
         db = {
           ...db,
           admin: payload.admin ? { ...db.admin, ...payload.admin } : db.admin,
+          admins: payload.admins || db.admins,
           faculty: payload.faculty || db.faculty,
           students: payload.students || db.students,
           courses: payload.courses || db.courses,
@@ -187,10 +189,11 @@
         if (!state.user || !backendReady || !["student", "faculty", "admin"].includes(state.user.role)) {
           return;
         }
+        await bootstrapFromApi(true);
         await loadSupportSummary();
         renderNav();
         if (state.section === "support" && state.support.tab !== "ai") {
-          await loadSupportMessages();
+          await loadSupportMessages(true);
         }
       }
 
@@ -480,7 +483,7 @@
           { key: "courses", label: "Courses", icon: "book" },
           { key: "announcements", label: "Announcements", icon: "bell" },
           { key: "results", label: "Results", icon: "chart" },
-          { key: "reports", label: "Reports", icon: "chart" },
+          { key: "reports", label: "Reports", icon: "activity" },
           { key: "support", label: "Messages", icon: "message" },
           { key: "settings", label: "Settings", icon: "gear" },
         ],
@@ -589,8 +592,10 @@
       // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
       // FORM FIELD BUILDERS
       // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-      function ff(label, id, val = "", type = "text") {
-        return `<div class="form-field"><label for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(val)}" required/></div>`;
+      function ff(label, id, val = "", type = "text", req = true) {
+        const inputHtml = `<input id="${id}" type="${type}" value="${esc(val)}" ${req ? "required" : ""}/>`;
+        const toggleHtml = type === "password" ? `<button type="button" tabindex="-1" onclick="const el=document.getElementById('${id}');el.type=el.type==='password'?'text':'password';" style="position:absolute;right:8px;background:none;border:none;cursor:pointer;opacity:0.6;font-size:1.1rem;top:50%;transform:translateY(-50%)">👁</button>` : ``;
+        return `<div class="form-field"><label for="${id}">${label}</label><div style="position:relative;display:flex;flex:1">${inputHtml}${toggleHtml}</div></div>`;
       }
       function fsel(label, id, opts, val = "") {
         const ops = opts
@@ -1258,6 +1263,9 @@
         <div class="section-actions"><button class="btn btn-primary" id="addAdminBtn">+ Add Admin</button></div>
       </div>
       <p style="font-size:0.9rem; color:var(--muted); margin-bottom:12px;">Admin accounts have full access to the system. You can add more administrators from here.</p>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Email</th><th>Actions</th></tr></thead><tbody>
+        ${(db.admins && db.admins.length > 0 ? db.admins : [db.admin]).map(a => `<tr><td>${a.name}</td><td>${a.email}</td><td><button class="btn btn-sm btn-ghost" data-edit-a="${a.id}">Edit</button> <button class="btn btn-sm btn-ghost" data-del-a="${a.id}">Delete</button></td></tr>`).join("")}
+      </tbody></table></div>
     </div>
   </div>
 </div>`;
@@ -1487,7 +1495,7 @@
 `;
       }
 
-      async function loadSupportMessages() {
+      async function loadSupportMessages(isPolling = false) {
         if (!["student", "faculty", "admin"].includes(state.user.role)) return;
         if (state.support.tab === "ai") return;
         ensureSupportSelection(state.support.tab);
@@ -1518,18 +1526,23 @@
         } finally {
           state.support.loading = false;
           if (state.section === "support") {
-            renderSections();
-            setTimeout(() => {
-              byId("mentorChatHistory")?.scrollTo(0, byId("mentorChatHistory").scrollHeight);
-              if (activeInputId === "mentorInput" || activeInputId === "aiInput") {
-                const input = byId(activeInputId);
-                if (input) {
-                  input.focus();
-                  const value = input.value;
-                  input.setSelectionRange(value.length, value.length);
+            const historyDiv = byId("mentorChatHistory");
+            if (isPolling && historyDiv) {
+              historyDiv.innerHTML = supportMessagesHtml();
+            } else {
+              renderSections();
+              setTimeout(() => {
+                byId("mentorChatHistory")?.scrollTo(0, byId("mentorChatHistory").scrollHeight);
+                if (activeInputId === "mentorInput" || activeInputId === "aiInput") {
+                  const input = byId(activeInputId);
+                  if (input) {
+                    input.focus();
+                    const value = input.value;
+                    input.setSelectionRange(value.length, value.length);
+                  }
                 }
-              }
-            }, 10);
+              }, 10);
+            }
           }
         }
       }
@@ -2592,7 +2605,7 @@
               `
         <div class="form-grid">
           ${ff("Full Name", "mName", s.name)}${ff("Email", "mEmail", s.email, "email")}${ff("Phone", "mPhone", s.phone)}
-          ${ff("Set New Password", "mPassword", "", "password")}
+          ${ff("Set New Password", "mPassword", "", "password", false)}
           ${ff("Course", "mCourse", s.course)}
           ${fsel("Year", "mYear", ["1st Year", "2nd Year", "3rd Year", "4th Year"], s.year)}
           ${fsel("Gender", "mGender", ["Female", "Male", "Other"], s.gender)}
@@ -2734,7 +2747,9 @@
         <div class="form-grid">
           ${ff("Full Name", "mName", f.name)}${ff("Email", "mEmail", f.email, "email")}${ff("Phone", "mPhone", f.phone)}
           ${ff("Department", "mDept", f.department)}${fta("Bio", "mBio", f.bio || "")}
+          ${ff("Set New Password", "mPassword", "", "password", false)}
         </div>
+        <div style="margin-top:10px;font-size:.86rem;color:var(--muted)">Current passwords are not visible for security. Leave the password field blank to keep the existing password.</div>
         <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
       `,
               async () => {
@@ -2744,6 +2759,7 @@
                   phone: byId("mPhone").value.trim(),
                   department: byId("mDept").value.trim(),
                   bio: byId("mBio").value.trim(),
+                  password: byId("mPassword")?.value || "",
                 };
                 if (backendReady) {
                   await apiRequest(`/api/faculty/${f.id}`, {
@@ -2897,6 +2913,62 @@
               }
             },
           );
+        });
+
+        document.querySelectorAll("[data-edit-a]").forEach(btn => {
+          btn.onclick = () => {
+            const adminId = btn.dataset.editA;
+            const a = (db.admins || [db.admin]).find(x => x.id === adminId);
+            if (!a) return;
+            openModal("Edit Administrator", "Update administrator details", `
+              <div class="form-grid">
+                ${ff("Full Name", "mAdminName", a.name)}
+                ${ff("Email", "mAdminEmail", a.email, "email")}
+                ${ff("Phone", "mAdminPhone", a.phone)}
+                ${ff("Set New Password", "mAdminPassword", "", "password", false)}
+              </div>
+              <div style="margin-top:10px;font-size:.86rem;color:var(--muted)">Leave password blank to keep current password.</div>
+              <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button><button type="submit" class="btn btn-primary">Save Changes</button></div>
+            `, async () => {
+              const name = byId("mAdminName").value.trim(),
+                email = byId("mAdminEmail").value.trim(),
+                phone = byId("mAdminPhone").value.trim(),
+                password = byId("mAdminPassword")?.value || "";
+              if (!name || !email) {
+                toast("Name and email are required.", "error"); return;
+              }
+              if (backendReady) {
+                await apiRequest(`/api/admins/${a.id}`, { method: "PUT", body: JSON.stringify({name, email, phone, password}) });
+                await refreshDbFromApi();
+                closeModal();
+                toast("Administrator updated.", "success");
+                renderSections();
+              } else {
+                toast("Must be connected to backend.", "error");
+              }
+            });
+          };
+        });
+
+        document.querySelectorAll("[data-del-a]").forEach(btn => {
+          btn.onclick = () => {
+            const adminId = btn.dataset.delA;
+            if (adminId === state.user.id) {
+              toast("You cannot delete yourself.", "error"); return;
+            }
+            confirm("Delete Administrator?", "Are you sure you want to permanently delete this administrator?", async () => {
+              if (backendReady) {
+                try {
+                  await apiRequest(`/api/admins/${adminId}`, { method: "DELETE" });
+                  await refreshDbFromApi();
+                  toast("Administrator deleted.", "success");
+                } catch (e) {
+                  toast(e.message || "Failed to delete.", "error");
+                }
+              }
+              renderSections();
+            });
+          }
         });
 
         // Admin/faculty: announcements
