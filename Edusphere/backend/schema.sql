@@ -1,0 +1,201 @@
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  role TEXT NOT NULL CHECK (role IN ('admin', 'faculty', 'student')),
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  full_name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS faculty_profiles (
+  user_id TEXT PRIMARY KEY,
+  department TEXT NOT NULL,
+  bio TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS student_profiles (
+  user_id TEXT PRIMARY KEY,
+  course TEXT NOT NULL,
+  year TEXT NOT NULL,
+  gender TEXT,
+  status TEXT NOT NULL DEFAULT 'Active',
+  mentor_id TEXT,
+  dob TEXT,
+  address TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (mentor_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS courses (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  faculty_id TEXT NOT NULL,
+  FOREIGN KEY (faculty_id) REFERENCES users(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS course_lectures (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  day TEXT NOT NULL,
+  slot TEXT NOT NULL,
+  FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS course_enrollments (
+  course_id TEXT NOT NULL,
+  student_id TEXT NOT NULL,
+  PRIMARY KEY (course_id, student_id),
+  FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS subjects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS marks (
+  student_id TEXT NOT NULL,
+  course_id TEXT NOT NULL,
+  marks INTEGER NOT NULL CHECK (marks BETWEEN 0 AND 100),
+  PRIMARY KEY (student_id, course_id),
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS attendance_summary (
+  student_id TEXT NOT NULL,
+  course_id TEXT NOT NULL,
+  attendance_percent INTEGER NOT NULL CHECK (attendance_percent BETWEEN 0 AND 100),
+  PRIMARY KEY (student_id, course_id),
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS attendance_sessions (
+  course_id TEXT NOT NULL,
+  session_date TEXT NOT NULL,
+  student_id TEXT NOT NULL,
+  present INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (course_id, session_date, student_id),
+  FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS announcements (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  priority TEXT NOT NULL,
+  date TEXT NOT NULL,
+  created_by_user_id TEXT NOT NULL,
+  created_by_role TEXT NOT NULL,
+  created_by_name TEXT NOT NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  priority TEXT NOT NULL,
+  date TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notification_reads (
+  notification_id TEXT NOT NULL,
+  student_id TEXT NOT NULL,
+  PRIMARY KEY (notification_id, student_id),
+  FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS assignments (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  details TEXT NOT NULL,
+  submission_date TEXT NOT NULL,
+  created_by_user_id TEXT NOT NULL,
+  created_by_name TEXT NOT NULL,
+  FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS lecture_status (
+  student_id TEXT NOT NULL,
+  course_id TEXT NOT NULL,
+  lecture_id TEXT NOT NULL,
+  seen INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (student_id, course_id, lecture_id),
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+  FOREIGN KEY (lecture_id) REFERENCES course_lectures(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS support_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id TEXT NOT NULL,
+  faculty_id TEXT NOT NULL,
+  sender_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (faculty_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS support_thread_reads (
+  user_id TEXT NOT NULL,
+  student_id TEXT NOT NULL,
+  faculty_id TEXT NOT NULL,
+  last_read_message_id INTEGER,
+  PRIMARY KEY (user_id, student_id, faculty_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (faculty_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (last_read_message_id) REFERENCES support_messages(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS admin_faculty_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  faculty_id TEXT NOT NULL,
+  sender_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (faculty_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS admin_faculty_thread_reads (
+  user_id TEXT NOT NULL,
+  faculty_id TEXT NOT NULL,
+  last_read_message_id INTEGER,
+  PRIMARY KEY (user_id, faculty_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (faculty_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (last_read_message_id) REFERENCES admin_faculty_messages(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS report_cards (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL,
+  semester TEXT NOT NULL,
+  published_on TEXT NOT NULL,
+  remarks TEXT,
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS report_card_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_card_id TEXT NOT NULL,
+  course_name TEXT NOT NULL,
+  marks INTEGER NOT NULL CHECK (marks BETWEEN 0 AND 100),
+  FOREIGN KEY (report_card_id) REFERENCES report_cards(id) ON DELETE CASCADE
+);
