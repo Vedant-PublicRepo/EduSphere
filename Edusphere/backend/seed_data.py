@@ -1,0 +1,20 @@
+SEED_DATA = {
+    "admin": {
+        "id": "ADMIN1",
+        "username": "vedantbakre@gmail.com",
+        "password": "ved@sam.com",
+        "name": "Vedant Bakre",
+        "email": "vedantbakre@gmail.com",
+        "phone": "",
+    },
+    "faculty": [],
+    "students": [],
+    "courses": [],
+    "subjects": [],
+    "marks": {},
+    "attendance": {},
+    "notifications": [],
+    "announcements": [],
+    "assignments": [],
+    "reportCards": {},
+}
