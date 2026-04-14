@@ -980,7 +980,7 @@ def bootstrap():
             dict(row)
             for row in conn.execute(
                 """
-                SELECT id, username, full_name AS name, email, phone
+                SELECT id, username, full_name AS "name", email, phone
                 FROM users
                 WHERE role = 'admin'
                 ORDER BY id
@@ -992,7 +992,7 @@ def bootstrap():
             dict(row)
             for row in conn.execute(
                 """
-                SELECT u.id, u.username, u.full_name AS name, u.email, u.phone, fp.department, fp.bio
+                SELECT u.id, u.username, u.full_name AS "name", u.email, u.phone, fp.department, fp.bio
                 FROM users u
                 JOIN faculty_profiles fp ON fp.user_id = u.id
                 WHERE u.role = 'faculty'
@@ -1004,8 +1004,8 @@ def bootstrap():
             dict(row)
             for row in conn.execute(
                 """
-                SELECT u.id, u.username, u.full_name AS name, u.email, u.phone,
-                       sp.course, sp.year, sp.gender, sp.status, sp.mentor_id AS facultyId, sp.dob, sp.address
+                SELECT u.id, u.username, u.full_name AS "name", u.email, u.phone,
+                       sp.course, sp.year, sp.gender, sp.status, sp.mentor_id AS "facultyId", sp.dob, sp.address
                 FROM users u
                 JOIN student_profiles sp ON sp.user_id = u.id
                 WHERE u.role = 'student'
@@ -1017,7 +1017,7 @@ def bootstrap():
         courses = []
         course_rows = conn.execute(
             """
-            SELECT id, name, faculty_id AS facultyId
+            SELECT id, name, faculty_id AS "facultyId"
             FROM courses
             ORDER BY id
             """
@@ -1113,10 +1113,10 @@ def bootstrap():
             }
             for row in conn.execute(
                 """
-                SELECT id, course_id AS courseId, topic, details,
-                       submission_date AS submissionDate,
-                       created_by_user_id AS createdByUserId,
-                       created_by_name AS createdByName
+                SELECT id, course_id AS "courseId", topic, details,
+                       submission_date AS "submissionDate",
+                       created_by_user_id AS "createdByUserId",
+                       created_by_name AS "createdByName"
                 FROM assignments
                 ORDER BY submission_date ASC
                 """
@@ -1126,7 +1126,7 @@ def bootstrap():
         report_cards = {}
         report_card_rows = conn.execute(
             """
-            SELECT id, student_id AS studentId, semester, published_on AS publishedOn, remarks
+            SELECT id, student_id AS "studentId", semester, published_on AS "publishedOn", remarks
             FROM report_cards
             ORDER BY published_on DESC
             """
