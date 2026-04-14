@@ -16,6 +16,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from db import IntegrityError, get_connection, init_db
+import traceback
+from werkzeug.exceptions import HTTPException
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -59,6 +61,12 @@ LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCK_SECONDS = 10 * 60
 LOGIN_MAX_ATTEMPTS = 5
 FAILED_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    if isinstance(e, HTTPException):
+        return e
+    return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
 
 def row_to_dict(row):
