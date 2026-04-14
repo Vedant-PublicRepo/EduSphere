@@ -470,6 +470,9 @@
         trash: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>`,
         save: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>`,
         export: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+        file: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`,
+        calendar: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`,
+        inbox: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg>`,
       };
 
       // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -493,8 +496,8 @@
           { key: "my-students", label: "My Students", icon: "users" },
           { key: "upload-marks", label: "Upload Marks", icon: "chart" },
           { key: "attendance", label: "Attendance", icon: "activity" },
-          { key: "schedule", label: "Schedule", icon: "book" },
-          { key: "assignments", label: "Assignments", icon: "book" },
+          { key: "schedule", label: "Schedule", icon: "calendar" },
+          { key: "assignments", label: "Assignments", icon: "file" },
           { key: "announcements", label: "Announcements", icon: "bell" },
           { key: "profile", label: "Profile", icon: "gear" },
           { key: "support", label: "Support", icon: "message" },
@@ -503,11 +506,11 @@
           { key: "dashboard", label: "Dashboard", icon: "grid" },
           { key: "my-details", label: "My Details", icon: "users" },
           { key: "my-courses", label: "My Courses", icon: "book" },
-          { key: "assignments", label: "Assignments", icon: "book" },
+          { key: "assignments", label: "Assignments", icon: "file" },
           { key: "results", label: "Results", icon: "chart" },
-          { key: "schedule", label: "Schedule", icon: "activity" },
+          { key: "schedule", label: "Schedule", icon: "calendar" },
           { key: "announcements", label: "Announcements", icon: "bell" },
-          { key: "notifications", label: "Notifications", icon: "bell" },
+          { key: "notifications", label: "Notifications", icon: "inbox" },
           { key: "support", label: "Support", icon: "message" },
         ],
       };
@@ -1312,6 +1315,17 @@
             state.support.facultyId = contacts[0].id;
           }
         }
+
+        if (state.user.role === "faculty" && tab === "admin") {
+          const contacts = supportContacts(tab);
+          if (!contacts.length) {
+            state.support.adminId = "";
+            return;
+          }
+          if (!contacts.some((a) => a.id === state.support.adminId)) {
+            state.support.adminId = contacts[0].id;
+          }
+        }
       }
 
       function supportMessagesHtml() {
@@ -1441,40 +1455,47 @@
                     const preview = summary?.lastMessage?.body || (isAdmin ? "No messages yet" : "Start the conversation");
                     const unread = summary?.unread || 0;
                     return `<button class="support-contact ${
-                    (isAdmin ? state.support.facultyId : state.support.studentId) === contact.id ? "active" : ""
-                  }" ${isAdmin ? `data-support-faculty="${contact.id}"` : `data-support-student="${contact.id}"`}>
+                    (isAdmin ? state.support.facultyId : (isFaculty && tab === "admin" ? state.support.adminId : state.support.studentId)) === contact.id ? "active" : ""
+                  }" ${
+                    isAdmin ? `data-support-faculty="${contact.id}"` : 
+                    (isFaculty && tab === "admin" ? `data-support-admin="${contact.id}"` : `data-support-student="${contact.id}"`)
+                  }>
             <div class="support-contact-head"><strong>${esc(contact.name)}</strong>${unread ? `<span class="support-unread">${unread}</span>` : ""}</div>
             <div class="support-contact-meta">${
               isAdmin
                 ? esc(contact.department || contact.email || "")
-                : `${esc(contact.course)} · ${esc(contact.year)}`
+                : isFaculty && tab === "admin"
+                  ? esc(contact.email || "Administrator")
+                  : `${esc(contact.course)} · ${esc(contact.year)}`
             }</div>
             <div class="support-preview">${esc(preview)}</div>
           </button>`;
                   },
                 )
                 .join("")
-            : `<div class="empty"><p>${isAdmin ? "No faculty available yet." : "No students are assigned to you yet."}</p></div>`
+            : `<div class="empty"><p>${isAdmin ? "No faculty available yet." : isFaculty && tab === "admin" ? "No admins available yet." : "No students are assigned to you yet."}</p></div>`
         }
       </div>
       <div class="chat-box">`
         : `<div class="chat-box">`
     }
-      <div class="chat-history" id="mentorChatHistory">
+      <div class="chat-history" id="${tab}ChatHistory">
         ${supportMessagesHtml()}
       </div>
       <form class="chat-input" id="mentorChatForm">
-        <input type="text" id="mentorInput" placeholder="${
+        <input type="text" id="${tab}Input" placeholder="${
           counterpart
             ? "Type your message..."
             : role === "student"
               ? "Assign a mentor first"
               : role === "faculty" && tab === "mentor"
                 ? "No student selected"
-                : role === "admin"
-                  ? "No faculty selected"
-                  : "Admin contact unavailable"
-        }" value="${esc(state.support.mentorDraft || "")}" ${counterpart ? "" : "disabled"} required autocomplete="off"/>
+                : role === "faculty" && tab === "admin"
+                  ? "No admin selected"
+                  : role === "admin"
+                    ? "No faculty selected"
+                    : "Admin contact unavailable"
+        }" value="${esc(tab === "admin" ? (state.support.adminDraft || "") : (state.support.mentorDraft || ""))}" ${counterpart ? "" : "disabled"} required autocomplete="off"/>
         <button type="submit" class="btn btn-primary" style="padding:0 24px;border-radius:999px" ${counterpart ? "" : "disabled"}>Send</button>
       </form>
     ${showContactList ? `</div></div>` : `</div>`}
@@ -1513,7 +1534,9 @@
             const query =
               state.user.role === "admin" && state.support.facultyId
                 ? `?facultyId=${encodeURIComponent(state.support.facultyId)}`
-                : "";
+                : state.user.role === "faculty" && state.support.adminId
+                  ? `?adminId=${encodeURIComponent(state.support.adminId)}`
+                  : "";
             payload = await apiRequest(`/api/support/admin-messages${query}`);
           }
           state.support.counterpart = payload.counterpart;
@@ -1526,14 +1549,15 @@
         } finally {
           state.support.loading = false;
           if (state.section === "support") {
-            const historyDiv = byId("mentorChatHistory");
+            const historyDiv = byId(state.support.tab + "ChatHistory");
             if (isPolling && historyDiv) {
               historyDiv.innerHTML = supportMessagesHtml();
             } else {
               renderSections();
               setTimeout(() => {
-                byId("mentorChatHistory")?.scrollTo(0, byId("mentorChatHistory").scrollHeight);
-                if (activeInputId === "mentorInput" || activeInputId === "aiInput") {
+                const hist = byId(state.support.tab + "ChatHistory");
+                hist?.scrollTo(0, hist.scrollHeight);
+                if (activeInputId === "mentorInput" || activeInputId === "aiInput" || activeInputId === "adminInput") {
                   const input = byId(activeInputId);
                   if (input) {
                     input.focus();
@@ -2352,17 +2376,31 @@
           };
         });
 
+        document.querySelectorAll("[data-support-admin]").forEach((btn) => {
+          btn.onclick = () => {
+            state.support.adminId = btn.dataset.supportAdmin;
+            loadSupportMessages();
+          };
+        });
+
         byId("mentorInput")?.addEventListener("input", (e) => {
           state.support.mentorDraft = e.target.value;
         });
+        byId("adminInput")?.addEventListener("input", (e) => {
+          state.support.adminDraft = e.target.value;
+        });
 
-        byId("mentorChatForm")?.addEventListener("submit", async (e) => {
+        const handleChatSubmit = async (e, tabType) => {
           e.preventDefault();
-          const input = byId("mentorInput");
+          const input = byId(tabType + "Input");
           const body = input?.value.trim();
           if (!body) return;
           try {
-            state.support.mentorDraft = "";
+            if (tabType === "admin") {
+              state.support.adminDraft = "";
+            } else {
+              state.support.mentorDraft = "";
+            }
             const payload = { body };
             let endpoint = "/api/support/messages";
             if (state.support.tab === "mentor") {
@@ -2370,6 +2408,7 @@
             } else {
               endpoint = "/api/support/admin-messages";
               if (role === "admin") payload.facultyId = state.support.facultyId;
+              if (role === "faculty") payload.adminId = state.support.adminId;
             }
             const result = await apiRequest(endpoint, {
               method: "POST",
@@ -2379,12 +2418,15 @@
             await loadSupportSummary();
             renderSections();
             setTimeout(() => {
-              byId("mentorChatHistory")?.scrollTo(0, byId("mentorChatHistory").scrollHeight);
+              byId(tabType + "ChatHistory")?.scrollTo(0, byId(tabType + "ChatHistory").scrollHeight);
             }, 10);
           } catch (error) {
             toast(error.message || "Unable to send message.", "error");
           }
-        });
+        };
+
+        byId("mentorChatForm")?.addEventListener("submit", (e) => handleChatSubmit(e, "mentor"));
+        byId("adminChatForm")?.addEventListener("submit", (e) => handleChatSubmit(e, "admin"));
 
         byId("aiInput")?.addEventListener("input", (e) => {
           state.support.aiDraft = e.target.value;

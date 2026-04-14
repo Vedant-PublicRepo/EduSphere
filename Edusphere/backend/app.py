@@ -19,6 +19,17 @@ from db import IntegrityError, get_connection, init_db
 import traceback
 from werkzeug.exceptions import HTTPException
 
+try:
+    with get_connection() as conn:
+        conn.execute("ALTER TABLE admin_faculty_messages ADD COLUMN admin_id TEXT DEFAULT 'ADMIN1'")
+        conn.execute("ALTER TABLE admin_faculty_thread_reads ADD COLUMN admin_id TEXT DEFAULT 'ADMIN1'")
+        conn.execute("ALTER TABLE admin_faculty_thread_reads DROP CONSTRAINT admin_faculty_thread_reads_pkey", [])
+        conn.execute("ALTER TABLE admin_faculty_thread_reads ADD PRIMARY KEY (user_id, faculty_id, admin_id)", [])
+        conn.commit()
+except Exception:
+    pass
+
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -808,16 +819,16 @@ def support_summary_for_user(conn, user):
                 }
             )
 
-        admin = admin_profile(conn)
+        admins = conn.execute("SELECT id, full_name AS name FROM users WHERE role = 'admin'").fetchall()
         admin_summary = []
-        if admin:
+        for admin in admins:
             last_read = conn.execute(
                 """
                 SELECT last_read_message_id
                 FROM admin_faculty_thread_reads
-                WHERE user_id = ? AND faculty_id = ?
+                WHERE user_id = ? AND faculty_id = ? AND admin_id = ?
                 """,
-                (user["id"], user["id"]),
+                (user["id"], user["id"], admin["id"]),
             ).fetchone()
             last_read_id = last_read["last_read_message_id"] if last_read and last_read["last_read_message_id"] else 0
             latest = conn.execute(
@@ -825,19 +836,19 @@ def support_summary_for_user(conn, user):
                 SELECT afm.id, afm.body, afm.created_at, afm.sender_id, u.full_name AS sender_name
                 FROM admin_faculty_messages afm
                 JOIN users u ON u.id = afm.sender_id
-                WHERE afm.faculty_id = ?
+                WHERE afm.faculty_id = ? AND afm.admin_id = ?
                 ORDER BY afm.id DESC
                 LIMIT 1
                 """,
-                (user["id"],),
+                (user["id"], admin["id"]),
             ).fetchone()
             unread = conn.execute(
                 """
                 SELECT COUNT(*)
                 FROM admin_faculty_messages
-                WHERE faculty_id = ? AND sender_id != ? AND id > ?
+                WHERE faculty_id = ? AND admin_id = ? AND sender_id != ? AND id > ?
                 """,
-                (user["id"], user["id"], last_read_id),
+                (user["id"], admin["id"], user["id"], last_read_id),
             ).fetchone()[0]
             total_unread += unread
             admin_summary.append(
@@ -849,43 +860,52 @@ def support_summary_for_user(conn, user):
                 }
             )
 
-        return {"mentor": mentor_summary, "admin": admin_summary, "totalUnread": total_unread}
+        return {
+            "mentor": mentor_summary,
+            "admin": admin_summary,
+            "totalUnread": total_unread,
+        }
 
     if role == "admin":
         rows = conn.execute(
             """
-            SELECT u.id, u.full_name AS name, fp.department, r.last_read_message_id
+            SELECT u.id, u.full_name AS name, fp.department
             FROM users u
             LEFT JOIN faculty_profiles fp ON fp.user_id = u.id
-            LEFT JOIN admin_faculty_thread_reads r
-              ON r.user_id = ? AND r.faculty_id = u.id
             WHERE u.role = 'faculty'
             ORDER BY u.full_name
-            """,
-            (user["id"],),
+            """
         ).fetchall()
         items = []
         total_unread = 0
         for row in rows:
-            last_read_id = row["last_read_message_id"] or 0
+            last_read = conn.execute(
+                """
+                SELECT last_read_message_id
+                FROM admin_faculty_thread_reads
+                WHERE user_id = ? AND faculty_id = ? AND admin_id = ?
+                """,
+                (user["id"], row["id"], user["id"]),
+            ).fetchone()
+            last_read_id = last_read["last_read_message_id"] if last_read and last_read["last_read_message_id"] else 0
             latest = conn.execute(
                 """
                 SELECT afm.id, afm.body, afm.created_at, afm.sender_id, u.full_name AS sender_name
                 FROM admin_faculty_messages afm
                 JOIN users u ON u.id = afm.sender_id
-                WHERE afm.faculty_id = ?
+                WHERE afm.faculty_id = ? AND afm.admin_id = ?
                 ORDER BY afm.id DESC
                 LIMIT 1
                 """,
-                (row["id"],),
+                (row["id"], user["id"]),
             ).fetchone()
             unread = conn.execute(
                 """
                 SELECT COUNT(*)
                 FROM admin_faculty_messages
-                WHERE faculty_id = ? AND sender_id != ? AND id > ?
+                WHERE faculty_id = ? AND admin_id = ? AND sender_id != ? AND id > ?
                 """,
-                (row["id"], user["id"], last_read_id),
+                (row["id"], user["id"], user["id"], last_read_id),
             ).fetchone()[0]
             total_unread += unread
             items.append(
@@ -2249,13 +2269,20 @@ def get_admin_messages():
     user = request.current_user
     with get_connection() as conn:
         if user["role"] == "faculty":
-            counterpart = admin_profile(conn)
+            admin_id = str(request.args.get("adminId", "")).strip()
+            if not admin_id:
+                return jsonify({"error": "adminId is required"}), 400
+            counterpart = conn.execute(
+                "SELECT id, full_name AS name, email, phone FROM users WHERE id = ? AND role = 'admin'",
+                (admin_id,)
+            ).fetchone()
             if not counterpart:
                 return jsonify({"counterpart": None, "messages": []})
-            messages = admin_faculty_messages(conn, user["id"])
-            mark_admin_faculty_thread_read(conn, user["id"], user["id"])
+            
+            messages = admin_faculty_messages(conn, user["id"], admin_id)
+            mark_admin_faculty_thread_read(conn, user["id"], user["id"], admin_id)
             conn.commit()
-            return jsonify({"counterpart": counterpart, "messages": messages})
+            return jsonify({"counterpart": dict(counterpart), "messages": messages})
 
         if user["role"] == "admin":
             faculty_id = str(request.args.get("facultyId", "")).strip()
@@ -2272,8 +2299,8 @@ def get_admin_messages():
             ).fetchone()
             if not faculty:
                 return jsonify({"error": "Faculty not found"}), 404
-            messages = admin_faculty_messages(conn, faculty_id)
-            mark_admin_faculty_thread_read(conn, user["id"], faculty_id)
+            messages = admin_faculty_messages(conn, faculty_id, user["id"])
+            mark_admin_faculty_thread_read(conn, user["id"], faculty_id, user["id"])
             conn.commit()
             return jsonify({"counterpart": dict(faculty), "messages": messages})
 
@@ -2292,7 +2319,11 @@ def create_admin_message():
     with get_connection() as conn:
         if user["role"] == "faculty":
             faculty_id = user["id"]
+            admin_id = str(payload.get("adminId", "")).strip()
+            if not admin_id:
+                return jsonify({"error": "adminId is required"}), 400
         elif user["role"] == "admin":
+            admin_id = user["id"]
             faculty_id = str(payload.get("facultyId", "")).strip()
             if not faculty_id:
                 return jsonify({"error": "facultyId is required"}), 400
@@ -2307,16 +2338,16 @@ def create_admin_message():
 
         message_row = conn.execute(
             """
-            INSERT INTO admin_faculty_messages (faculty_id, sender_id, body)
-            VALUES (?, ?, ?)
+            INSERT INTO admin_faculty_messages (faculty_id, admin_id, sender_id, body)
+            VALUES (?, ?, ?, ?)
             RETURNING id
             """,
-            (faculty_id, user["id"], body),
+            (faculty_id, admin_id, user["id"], body),
         ).fetchone()
         conn.commit()
         message = conn.execute(
             """
-            SELECT afm.id, afm.faculty_id, afm.sender_id, afm.body, afm.created_at,
+            SELECT afm.id, afm.faculty_id, afm.admin_id, afm.sender_id, afm.body, afm.created_at,
                    u.role AS sender_role, u.full_name AS sender_name
             FROM admin_faculty_messages afm
             JOIN users u ON u.id = afm.sender_id
