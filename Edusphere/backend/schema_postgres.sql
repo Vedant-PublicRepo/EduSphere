@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS announcements (
   body TEXT NOT NULL,
   priority TEXT NOT NULL,
   date TEXT NOT NULL,
+  target TEXT DEFAULT 'all',
   created_by_user_id TEXT NOT NULL,
   created_by_role TEXT NOT NULL,
   created_by_name TEXT NOT NULL,

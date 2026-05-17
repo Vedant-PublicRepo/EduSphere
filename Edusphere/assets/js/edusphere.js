@@ -510,7 +510,7 @@
           { key: "results", label: "Results", icon: "chart" },
           { key: "schedule", label: "Schedule", icon: "calendar" },
           { key: "announcements", label: "Announcements", icon: "bell" },
-          { key: "notifications", label: "Notifications", icon: "inbox" },
+          { key: "notifications", label: "Attendance & Notices", icon: "inbox" },
           { key: "support", label: "Support", icon: "message" },
         ],
       };
@@ -790,6 +790,10 @@
         ) {
           loadSupportMessages();
         }
+        if (section === "announcements" && db.announcements && db.announcements.length > 0) {
+          const sorted = db.announcements.slice().sort((a,b) => new Date(b.date) - new Date(a.date) || b.id.localeCompare(a.id));
+          localStorage.setItem(`lastSeenAnn_${state.user.id}`, sorted[0].id);
+        }
         closeSidebar();
       }
 
@@ -866,11 +870,20 @@
         }
         const items = navConfig[state.user.role] || [];
         const unreadMessages = state.support.summary?.totalUnread || 0;
+        const unreadAnnouncements = (() => {
+          if (!db.announcements || !db.announcements.length) return 0;
+          const lastSeen = localStorage.getItem(`lastSeenAnn_${state.user.id}`);
+          if (!lastSeen) return db.announcements.length;
+          const sorted = db.announcements.slice().sort((a,b) => new Date(b.date) - new Date(a.date) || b.id.localeCompare(a.id));
+          const idx = sorted.findIndex(a => a.id === lastSeen);
+          return idx === -1 ? sorted.length : idx;
+        })();
+
         byId("navList").innerHTML = items
           .map(
             (item) => `
     <button class="nav-item ${state.section === item.key ? "active" : ""}" data-nav="${item.key}">
-      ${IC[item.icon] || ""}<span>${item.label}</span>${item.key === "support" && unreadMessages ? `<strong class="nav-badge">${unreadMessages}</strong>` : ""}
+      ${IC[item.icon] || ""}<span>${item.label}</span>${item.key === "support" && unreadMessages ? `<strong class="nav-badge">${unreadMessages}</strong>` : ""}${item.key === "announcements" && unreadAnnouncements ? `<strong class="nav-badge" style="background:var(--danger)">${unreadAnnouncements}</strong>` : ""}
     </button>`,
           )
           .join("");
@@ -1112,9 +1125,15 @@
         .map((c) => {
           const f = getFaculty(c.facultyId);
           return `<div class="course-card">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <div class="stat-icon" style="width:40px;height:40px;border-radius:12px">${IC.book}</div>
-          <h4>${c.name}</h4>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="stat-icon" style="width:40px;height:40px;border-radius:12px">${IC.book}</div>
+            <h4>${c.name}</h4>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm btn-secondary" data-edit-course="${c.id}">${IC.edit}</button>
+            <button class="btn btn-sm btn-danger" data-delete-course="${c.id}">${IC.trash}</button>
+          </div>
         </div>
         ${f ? `<div class="faculty-row"><div class="faculty-avatar">${initials(f.name)}</div><span style="font-size:.85rem;color:var(--muted)">${f.name}</span></div>` : ""}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
@@ -1290,6 +1309,9 @@
           const mentor = getFaculty(getStudent(state.user.id)?.facultyId);
           return mentor ? [mentor] : [];
         }
+        if (state.user.role === "faculty" && tab === "admin") {
+          return db.admins && db.admins.length > 0 ? db.admins.slice().sort((a, b) => a.name.localeCompare(b.name)) : (db.admin ? [db.admin] : []);
+        }
         return [];
       }
 
@@ -1410,13 +1432,8 @@
         const summaryItems = supportSummaryItems(tab);
         const counterpart = state.support.counterpart;
         const header = supportHeaderText();
-        const showContactList = (isFaculty && tab === "mentor") || (isAdmin && tab === "admin");
-        const activeLabel =
-          role === "student"
-            ? "Contact Mentor"
-            : tab === "mentor"
-              ? "Student Chats"
-              : "Admin Chat";
+        const showContactList = (isFaculty && (tab === "mentor" || tab === "admin")) || (isAdmin && tab === "admin");
+        const activeLabel = role === "student" ? "Contact Mentor" : "Student Chats";
 
         return `
   <div class="support-tabs">
@@ -1479,11 +1496,11 @@
       <div class="chat-box">`
         : `<div class="chat-box">`
     }
-      <div class="chat-history" id="${tab}ChatHistory">
+      <div class="chat-history" id="${tab === 'ai' ? 'hidden' : tab}ChatHistory">
         ${supportMessagesHtml()}
       </div>
-      <form class="chat-input" id="mentorChatForm">
-        <input type="text" id="${tab}Input" placeholder="${
+      <form class="chat-input" id="${tab === 'ai' ? 'hidden' : tab}ChatForm">
+        <input type="text" id="${tab === 'ai' ? 'hidden' : tab}Input" placeholder="${
           counterpart
             ? "Type your message..."
             : role === "student"
@@ -1579,6 +1596,18 @@
         }
       };
 
+      function parseMarkdown(text) {
+        if (!text) return "";
+        let html = esc(text);
+        html = html.replace(/(^|\n)[\*\-] (.*?)(?=(\n|$))/g, '$1• $2');
+        html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*([^\*\n]+)\*/g, '<em>$1</em>');
+        html = html.replace(/```([\s\S]*?)```/g, '<pre style="background:var(--bg-hover, rgba(0,0,0,0.05));padding:8px;border-radius:4px;overflow-x:auto;margin:8px 0;font-family:monospace;font-size:0.85em"><code>$1</code></pre>');
+        html = html.replace(/`([^`\n]+)`/g, '<code style="background:var(--bg-hover, rgba(0,0,0,0.05));padding:2px 4px;border-radius:3px;font-family:monospace;font-size:0.9em">$1</code>');
+        html = html.replace(/\n/g, '<br>');
+        return html;
+      }
+
       window.sendMessage = function(type) {
         const inp = byId(type + "Input");
         const hist = byId(type + "ChatHistory");
@@ -1603,9 +1632,9 @@
           .then((result) => {
             const loading = byId(loadingId);
             if (loading) {
-              loading.outerHTML = `<div class="chat-msg other"><div>${esc(result.reply)}</div></div>`;
+              loading.outerHTML = `<div class="chat-msg other"><div>${parseMarkdown(result.reply)}</div></div>`;
             } else {
-              hist.innerHTML += `<div class="chat-msg other"><div>${esc(result.reply)}</div></div>`;
+              hist.innerHTML += `<div class="chat-msg other"><div>${parseMarkdown(result.reply)}</div></div>`;
             }
           })
           .catch((error) => {
@@ -2248,7 +2277,7 @@
 
 <div class="page-section ${state.section === "notifications" ? "active" : ""}">
   <div class="section-card">
-    <div class="section-head"><div><h3>Notifications</h3><p>${unread} unread notice${unread !== 1 ? "s" : ""}</p></div></div>
+    <div class="section-head"><div><h3>Attendance & Notices</h3><p>${unread} unread notice${unread !== 1 ? "s" : ""}</p></div></div>
     ${heatmapHTML(s.id)}
     <div class="notice-list">
       ${db.notifications
@@ -2774,6 +2803,54 @@
           });
         });
 
+        // Admin: edit course
+        document.querySelectorAll("[data-edit-course]").forEach((btn) => {
+          btn.onclick = () => {
+            const c = getCourse(btn.dataset.editCourse);
+            if (!c) return;
+            openModal("Edit Course", "Update course information", `
+              <div class="form-grid">
+                ${ff("Course Name", "mCourseName", c.name)}
+                <div class="form-field"><label for="mCourseFac">Faculty</label><select id="mCourseFac">${db.faculty.map((f) => `<option value="${f.id}" ${c.facultyId === f.id ? "selected" : ""}>${f.name}</option>`).join("")}</select></div>
+              </div>
+              <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
+            `, async () => {
+               const name = byId("mCourseName").value.trim(),
+                     fac = byId("mCourseFac").value;
+               if (!name) return toast("Course name required", "error");
+               if (backendReady) {
+                 await apiRequest(`/api/courses/${c.id}`, {
+                   method: "PUT",
+                   body: JSON.stringify({ name, facultyId: fac }),
+                 });
+                 await refreshDbFromApi();
+               } else {
+                 c.name = name;
+                 c.facultyId = fac;
+               }
+               closeModal(); toast("Course updated!", "success"); renderSections();
+            });
+          };
+        });
+
+        // Admin: delete course
+        document.querySelectorAll("[data-delete-course]").forEach((btn) => {
+          btn.onclick = () => {
+            const c = getCourse(btn.dataset.deleteCourse);
+            if (!c) return;
+            confirm("Delete Course?", "This will remove all students from this course and delete all course data. Cannot be undone.", async () => {
+              if (backendReady) {
+                await apiRequest(`/api/courses/${c.id}`, { method: "DELETE" });
+                await refreshDbFromApi();
+              } else {
+                db.courses = db.courses.filter(x => x.id !== c.id);
+              }
+              toast("Course deleted.", "success");
+              renderSections();
+            });
+          };
+        });
+
         // Admin: add faculty
         byId("addFacultyBtn")?.addEventListener("click", openAddFacultyModal);
 
@@ -3022,6 +3099,7 @@
       <div class="form-grid">
         ${ff("Title", "annTitle")}
         ${fsel("Priority", "annPriority", ["Urgent", "Info", "General"])}
+        ${fsel("Target", "annTarget", ["All", "Students", "Faculty"])}
         ${fta("Announcement", "annBody")}
       </div>
       <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button><button type="submit" class="btn btn-primary">Publish</button></div>
@@ -3037,6 +3115,7 @@
                     title,
                     body,
                     priority: byId("annPriority").value,
+                    target: byId("annTarget").value.toLowerCase(),
                     date: new Date().toISOString().slice(0, 10),
                     createdByRole: "admin",
                     createdByUserId: state.user.id,
@@ -3050,6 +3129,7 @@
                   title,
                   body,
                   priority: byId("annPriority").value,
+                  target: byId("annTarget").value.toLowerCase(),
                   date: new Date().toISOString().slice(0, 10),
                   createdByRole: "admin",
                   createdByName: state.user.name,
@@ -3069,6 +3149,7 @@
       <div class="form-grid">
         ${ff("Title", "annTitle")}
         ${fsel("Priority", "annPriority", ["Urgent", "Info", "General"])}
+        ${fsel("Target", "annTarget", ["All", "Students", "Faculty"])}
         ${fta("Announcement", "annBody")}
       </div>
       <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button><button type="submit" class="btn btn-primary">Publish</button></div>
@@ -3084,6 +3165,7 @@
                     title,
                     body,
                     priority: byId("annPriority").value,
+                    target: byId("annTarget").value.toLowerCase(),
                     date: new Date().toISOString().slice(0, 10),
                     createdByRole: "faculty",
                     createdByUserId: state.user.id,
@@ -3097,6 +3179,7 @@
                   title,
                   body,
                   priority: byId("annPriority").value,
+                  target: byId("annTarget").value.toLowerCase(),
                   date: new Date().toISOString().slice(0, 10),
                   createdByRole: "faculty",
                   createdByName: state.user.name,

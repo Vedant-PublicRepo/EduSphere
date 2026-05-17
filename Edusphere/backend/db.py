@@ -162,6 +162,15 @@ def init_db() -> None:
             statements = [stmt.strip() for stmt in schema.split(";") if stmt.strip()]
             for statement in statements:
                 conn.execute(statement)
+            try:
+                conn.execute("ALTER TABLE announcements ADD COLUMN target TEXT DEFAULT 'all'")
+            except Exception:
+                pass
         else:
             raw_conn = conn._conn
             raw_conn.executescript(schema)
+            try:
+                raw_conn.execute("ALTER TABLE announcements ADD COLUMN target TEXT DEFAULT 'all'")
+            except Exception:
+                pass
+        conn.commit()

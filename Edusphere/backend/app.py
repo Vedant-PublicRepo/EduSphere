@@ -73,6 +73,10 @@ LOGIN_LOCK_SECONDS = 10 * 60
 LOGIN_MAX_ATTEMPTS = 5
 FAILED_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     if isinstance(e, HTTPException):
@@ -544,14 +548,15 @@ def bootstrap_for_user(user, payload):
             if key.split("_", 2)[1] in course_ids
         }
         return {
-            "admin": None,
+            "admin": payload.get("admin"),
+            "admins": payload.get("admins", []),
             "faculty": filtered_faculty,
             "students": filtered_students,
             "courses": own_courses,
             "subjects": payload["subjects"],
             "marks": filtered_marks,
             "attendance": filtered_attendance,
-            "announcements": payload["announcements"],
+            "announcements": [a for a in payload["announcements"] if a.get("target", "all") in ("all", "faculty")],
             "notifications": [],
             "assignments": filtered_assignments,
             "reportCards": filtered_report_cards,
@@ -584,7 +589,7 @@ def bootstrap_for_user(user, payload):
         "subjects": payload["subjects"],
         "marks": {student_id: payload["marks"].get(student_id, {})},
         "attendance": {student_id: payload["attendance"].get(student_id, {})},
-        "announcements": payload["announcements"],
+        "announcements": [a for a in payload["announcements"] if a.get("target", "all") in ("all", "students")],
         "notifications": filtered_notifications,
         "assignments": [assignment for assignment in payload["assignments"] if assignment["courseId"] in course_ids],
         "reportCards": {student_id: payload["reportCards"].get(student_id, [])},
@@ -660,17 +665,17 @@ def admin_profile(conn):
     return dict(admin) if admin else None
 
 
-def admin_faculty_messages(conn, faculty_id: str):
+def admin_faculty_messages(conn, faculty_id: str, admin_id: str):
     rows = conn.execute(
         """
-        SELECT afm.id, afm.faculty_id, afm.sender_id, afm.body, afm.created_at,
+        SELECT afm.id, afm.faculty_id, afm.admin_id, afm.sender_id, afm.body, afm.created_at,
                u.role AS sender_role, u.full_name AS sender_name
         FROM admin_faculty_messages afm
         JOIN users u ON u.id = afm.sender_id
-        WHERE afm.faculty_id = ?
+        WHERE afm.faculty_id = ? AND afm.admin_id = ?
         ORDER BY afm.created_at ASC, afm.id ASC
         """,
-        (faculty_id,),
+        (faculty_id, admin_id),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -699,28 +704,41 @@ def mark_support_thread_read(conn, user_id: str, student_id: str, faculty_id: st
     )
 
 
-def mark_admin_faculty_thread_read(conn, user_id: str, faculty_id: str):
+def mark_admin_faculty_thread_read(conn, user_id: str, faculty_id: str, admin_id: str):
     latest = conn.execute(
         """
         SELECT id
         FROM admin_faculty_messages
-        WHERE faculty_id = ?
+        WHERE faculty_id = ? AND admin_id = ?
         ORDER BY id DESC
         LIMIT 1
         """,
-        (faculty_id,),
+        (faculty_id, admin_id),
     ).fetchone()
     if not latest:
         return
-    conn.execute(
-        """
-        INSERT INTO admin_faculty_thread_reads (user_id, faculty_id, last_read_message_id)
-        VALUES (?, ?, ?)
-        ON CONFLICT(user_id, faculty_id)
-        DO UPDATE SET last_read_message_id = excluded.last_read_message_id
-        """,
-        (user_id, faculty_id, latest["id"]),
-    )
+    
+    try:
+        conn.execute(
+            """
+            INSERT INTO admin_faculty_thread_reads (user_id, faculty_id, admin_id, last_read_message_id)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, faculty_id, admin_id)
+            DO UPDATE SET last_read_message_id = excluded.last_read_message_id
+            """,
+            (user_id, faculty_id, admin_id, latest["id"]),
+        )
+    except Exception:
+        # Fallback for SQLite where altering primary key to include admin_id might have failed
+        conn.execute(
+            """
+            INSERT INTO admin_faculty_thread_reads (user_id, faculty_id, admin_id, last_read_message_id)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, faculty_id)
+            DO UPDATE SET last_read_message_id = excluded.last_read_message_id
+            """,
+            (user_id, faculty_id, admin_id, latest["id"]),
+        )
 
 
 def support_summary_for_user(conn, user):
@@ -1089,7 +1107,7 @@ def bootstrap():
             dict(row)
             for row in conn.execute(
                 """
-                SELECT id, title, body, priority, date,
+                SELECT id, title, body, priority, date, target,
                        created_by_role AS createdByRole,
                        created_by_user_id AS createdByUserId,
                        created_by_name AS createdByName
@@ -1709,6 +1727,50 @@ def create_course():
     return jsonify({"id": course_id}), 201
 
 
+@app.put("/api/courses/<course_id>")
+@require_roles("admin")
+def update_course(course_id: str):
+    payload = request.get_json(silent=True) or {}
+    with get_connection() as conn:
+        existing = conn.execute("SELECT id FROM courses WHERE id = ?", (course_id,)).fetchone()
+        if not existing:
+            return jsonify({"error": "Course not found"}), 404
+        
+        try:
+            name = clean_text(payload.get("name"), field_name="Course name", max_len=100)
+            faculty_id = ensure_faculty_exists(conn, str(payload.get("facultyId", "")).strip())
+            if not faculty_id:
+                raise ValueError("Faculty is required")
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
+        
+        conn.execute(
+            "UPDATE courses SET name = ?, faculty_id = ? WHERE id = ?",
+            (name, faculty_id, course_id)
+        )
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/courses/<course_id>")
+@require_roles("admin")
+def delete_course(course_id: str):
+    with get_connection() as conn:
+        existing = conn.execute("SELECT id FROM courses WHERE id = ?", (course_id,)).fetchone()
+        if not existing:
+            return jsonify({"error": "Course not found"}), 404
+        
+        conn.execute("DELETE FROM course_lectures WHERE course_id = ?", (course_id,))
+        conn.execute("DELETE FROM course_enrollments WHERE course_id = ?", (course_id,))
+        conn.execute("DELETE FROM marks WHERE course_id = ?", (course_id,))
+        conn.execute("DELETE FROM attendance_summary WHERE course_id = ?", (course_id,))
+        conn.execute("DELETE FROM lecture_status WHERE course_id = ?", (course_id,))
+        conn.execute("DELETE FROM assignments WHERE course_id = ?", (course_id,))
+        conn.execute("DELETE FROM courses WHERE id = ?", (course_id,))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
 @app.post("/api/courses/<course_id>/lectures")
 @require_auth
 def create_lecture(course_id: str):
@@ -1814,6 +1876,7 @@ def create_announcement():
     body = str(payload.get("body", "")).strip()
     priority = str(payload.get("priority", "")).strip() or "General"
     date = str(payload.get("date", "")).strip()
+    target = str(payload.get("target", "all")).strip()
     user = request.current_user
     if not all([title, body, date]):
         return jsonify({"error": "Missing required announcement fields"}), 400
@@ -1824,8 +1887,8 @@ def create_announcement():
         conn.execute(
             """
             INSERT INTO announcements
-            (id, title, body, priority, date, created_by_user_id, created_by_role, created_by_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, title, body, priority, date, target, created_by_user_id, created_by_role, created_by_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 announcement_id,
@@ -1833,6 +1896,7 @@ def create_announcement():
                 body,
                 priority,
                 date,
+                target,
                 user["id"],
                 user["role"],
                 user["full_name"],
