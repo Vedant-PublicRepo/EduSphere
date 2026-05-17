@@ -1,0 +1,3 @@
+Open Terminal in Root Folder
+Install Requirements - .venv\Scripts\python -m pip install -r requirements.txt
+Run Local Server - .venv\Scripts\python backend\app.py
